@@ -43,12 +43,13 @@ function Get-InstalledApps {
             $found += $app
         }
     }
-    return $found
+    return ,$found
 }
 
 function Show-SelectionMenu {
     param($apps)
 
+    $apps = @($apps)
     $selected = @{}
     foreach ($app in $apps) { $selected[$app.Name] = $true }
 
@@ -128,8 +129,36 @@ function Backup {
     Write-Host "✅ Sauvegarde terminée dans : $backupRoot" -ForegroundColor Green
 }
 
+function Select-Folder {
+    Add-Type -AssemblyName System.Windows.Forms
+    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dialog.Description = "Sélectionnez le dossier de sauvegarde"
+    $dialog.ShowNewFolderButton = $false
+    if ($dialog.ShowDialog() -eq "OK") {
+        return $dialog.SelectedPath
+    }
+    return $null
+}
+
 function Restore {
-    $backupRoot = Read-Host "Chemin de la sauvegarde"
+    Show-Banner
+    Write-Host "=== Chemin de la sauvegarde ===" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  P. Parcourir (fenêtre de sélection)" -ForegroundColor Yellow
+    Write-Host "  ou glisser-déposer / coller le chemin puis Entrée" -ForegroundColor Gray
+    Write-Host ""
+    $raw = Read-Host "Chemin (ou P pour parcourir)"
+
+    if ($raw -eq "P" -or $raw -eq "p") {
+        $backupRoot = Select-Folder
+        if (-not $backupRoot) {
+            Write-Host "❌ Aucun dossier sélectionné." -ForegroundColor Red
+            return
+        }
+    } else {
+        # Supprime les guillemets doubles ou simples autour du chemin (drag-drop ou copier-coller)
+        $backupRoot = $raw.Trim() -replace '^["'']|["'']$', ''
+    }
 
     if (-not (Test-Path $backupRoot)) {
         Write-Host "❌ Dossier introuvable : $backupRoot" -ForegroundColor Red
@@ -137,7 +166,7 @@ function Restore {
     }
 
     $all = Get-SupportedApps
-    $available = $all | Where-Object { Test-Path "$backupRoot\$($_.Name)" }
+    $available = @($all | Where-Object { Test-Path "$backupRoot\$($_.Name)" })
 
     if ($available.Count -eq 0) {
         Write-Host "❌ Aucune sauvegarde reconnue dans ce dossier." -ForegroundColor Red
@@ -171,7 +200,10 @@ function Restore {
         $i++
         $pct = [int](($i / $total) * 100)
         Write-Progress -Activity "Restore" -Status "$($app.Name)..." -PercentComplete $pct
-        Copy-Item "$backupRoot\$($app.Name)" $app.Profile -Recurse -Force -EA SilentlyContinue
+        if (-not (Test-Path $app.Profile)) {
+            New-Item -ItemType Directory -Path $app.Profile -Force | Out-Null
+        }
+        Copy-Item "$backupRoot\$($app.Name)\*" $app.Profile -Recurse -Force -EA SilentlyContinue
     }
 
     Write-Progress -Activity "Restore" -Completed
